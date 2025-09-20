@@ -1,0 +1,161 @@
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const state = {
+  bullets: [],
+  enemies: [],
+  keys: {},
+  mouse: {x:0,y:0,down:false}
+};
+
+const player = {
+  x: canvas.width/2,
+  y: canvas.height/2,
+  angle: 0,
+  speed: 0,
+  size: 18,
+  color: '#66f'
+};
+
+function spawnEnemy(){
+  const e = {
+    x: Math.random()*canvas.width,
+    y: Math.random()*canvas.height,
+    angle: Math.random()*Math.PI*2,
+    speed: 0.6 + Math.random()*0.8,
+    size: 16,
+    color: '#f66'
+  };
+  state.enemies.push(e);
+}
+
+for(let i=0;i<4;i++) spawnEnemy();
+
+canvas.addEventListener('mousemove', e=>{
+  const rect = canvas.getBoundingClientRect();
+  state.mouse.x = e.clientX - rect.left;
+  state.mouse.y = e.clientY - rect.top;
+});
+
+canvas.addEventListener('mousedown', ()=>state.mouse.down = true);
+canvas.addEventListener('mouseup', ()=>state.mouse.down = false);
+
+window.addEventListener('keydown', e=> state.keys[e.key.toLowerCase()] = true);
+window.addEventListener('keyup', e=> state.keys[e.key.toLowerCase()] = false);
+
+function tick(dt){
+  // player controls (WASD)
+  let mvx = 0, mvy = 0;
+  if(state.keys['w']) mvy -= 1;
+  if(state.keys['s']) mvy += 1;
+  if(state.keys['a']) mvx -= 1;
+  if(state.keys['d']) mvx += 1;
+  const mvlen = Math.hypot(mvx,mvy) || 1;
+  player.x += (mvx/mvlen)*120*dt;
+  player.y += (mvy/mvlen)*120*dt;
+
+  // aim towards mouse
+  player.angle = Math.atan2(state.mouse.y - player.y, state.mouse.x - player.x);
+
+  // shooting
+  if(state.mouse.down && state.bullets.length < 6){
+    shoot(player.x + Math.cos(player.angle)*player.size, player.y + Math.sin(player.angle)*player.size, player.angle);
+  }
+
+  // update bullets
+  for(let i = state.bullets.length-1; i>=0; i--){
+    const b = state.bullets[i];
+    b.x += Math.cos(b.angle)*b.speed*dt;
+    b.y += Math.sin(b.angle)*b.speed*dt;
+    b.life -= dt;
+    if(b.life <= 0 || b.x<0 || b.x>canvas.width || b.y<0 || b.y>canvas.height) state.bullets.splice(i,1);
+  }
+
+  // update enemies (simple seek player)
+  state.enemies.forEach(e=>{
+    const dx = player.x - e.x, dy = player.y - e.y;
+    const ang = Math.atan2(dy,dx);
+    e.x += Math.cos(ang)*e.speed*dt*60;
+    e.y += Math.sin(ang)*e.speed*dt*60;
+  });
+
+  // collisions bullet -> enemy
+  for(let i=state.bullets.length-1;i>=0;i--){
+    const b = state.bullets[i];
+    for(let j=state.enemies.length-1;j>=0;j--){
+      const e = state.enemies[j];
+      const d = Math.hypot(b.x-e.x,b.y-e.y);
+      if(d < e.size + 4){
+        state.enemies.splice(j,1);
+        state.bullets.splice(i,1);
+        spawnEnemy(); // respawn
+        break;
+      }
+    }
+  }
+
+  // clamp player
+  player.x = Math.max(0,Math.min(canvas.width,player.x));
+  player.y = Math.max(0,Math.min(canvas.height,player.y));
+}
+
+let shootCooldown = 0;
+function shoot(x,y,angle){
+  if(shootCooldown > 0) return;
+  shootCooldown = 0.18; // seconds between shots
+  state.bullets.push({x,y,angle,speed:420,life:2});
+}
+
+function draw(){
+  // background
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // grid
+  ctx.strokeStyle = '#0d1a2b';
+  ctx.lineWidth = 1;
+  for(let gx=0; gx<canvas.width; gx+=40){
+    ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,canvas.height); ctx.stroke();
+  }
+  for(let gy=0; gy<canvas.height; gy+=40){
+    ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(canvas.width,gy); ctx.stroke();
+  }
+
+  // player tank
+  drawTank(player);
+
+  // enemies
+  state.enemies.forEach(e=> drawTank(e));
+
+  // bullets
+  ctx.fillStyle = '#ffd';
+  state.bullets.forEach(b=>{
+    ctx.beginPath(); ctx.arc(b.x,b.y,4,0,Math.PI*2); ctx.fill();
+  });
+}
+
+function drawTank(t){
+  ctx.save();
+  ctx.translate(t.x,t.y);
+  ctx.rotate(t.angle);
+  // body
+  ctx.fillStyle = t.color;
+  ctx.fillRect(-t.size, -t.size*0.6, t.size*2, t.size*1.2);
+  // turret
+  ctx.fillStyle = '#222';
+  ctx.fillRect(0, -6, t.size+10, 12);
+  // turret cap
+  ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(0.05,(now-last)/1000);
+  last = now;
+  shootCooldown = Math.max(0, shootCooldown - dt);
+
+  tick(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
